@@ -179,24 +179,20 @@ async def _sincronizar_roles(guild):
                 posiciones[rol] = total - i
         if posiciones:
             await guild.edit_role_positions(positions=posiciones)
-    except discord.Forbidden:
+    except (discord.Forbidden, discord.HTTPException):
         errores.append(
             "No pude reordenar la jerarquía de roles — el rol del bot debe estar por encima de "
-            "**👑 | Fundador** en la lista de roles del servidor."
+            "**👑 | Fundador** en la lista de roles del servidor. Arrastralo ahí y volvé a correr `!server`."
         )
-    except discord.HTTPException as e:
-        errores.append(f"Error reordenando roles: {e}")
 
     return creados, reutilizados, errores
 
 
-async def _configurar_community(guild):
+async def _configurar_community(guild, canal_reglas, canal_updates):
     try:
         if "COMMUNITY" in guild.features:
             return "ya estaba habilitada"
 
-        canal_reglas = guild.get_channel(CANAL_REGLAS_ID)
-        canal_updates = guild.get_channel(CANAL_MODERADOR_ID)
         if not canal_reglas or not canal_updates:
             return "no se pudo — no encontré los canales de reglas/moderación configurados"
 
@@ -235,6 +231,8 @@ class SetupServidorCog(commands.Cog):
         canales_reutilizados = 0
         foros_creados = 0
         hilos_creados = 0
+        canal_reglas_obj = None
+        canal_moderador_obj = None
 
         # 1. Roles primero (los necesitamos para armar los permisos de canal)
         roles_creados, roles_reutilizados, errores_roles = await _sincronizar_roles(guild)
@@ -268,6 +266,14 @@ class SetupServidorCog(commands.Cog):
                     errores.append(error)
                     continue
 
+                # Guardamos la referencia real a estos 2 canales (los necesita
+                # Community), sin importar si se reutilizaron por ID o se
+                # crearon nuevos en este mismo run.
+                if datos_canal.get("id_existente") == CANAL_REGLAS_ID:
+                    canal_reglas_obj = canal
+                elif datos_canal.get("id_existente") == CANAL_MODERADOR_ID:
+                    canal_moderador_obj = canal
+
                 if datos_canal["tipo"] == "foro":
                     if fue_creado:
                         foros_creados += 1
@@ -283,7 +289,7 @@ class SetupServidorCog(commands.Cog):
                         canales_reutilizados += 1
 
         # 3. Community
-        estado_community = await _configurar_community(guild)
+        estado_community = await _configurar_community(guild, canal_reglas_obj, canal_moderador_obj)
 
         # 4. Resumen final
         embed = discord.Embed(title="✅ Estructura configurada", color=discord.Color.green())
