@@ -108,13 +108,37 @@ async def _sincronizar_roles(guild):
     errores = []
     roles_por_nombre = {}
 
+    # Traemos la lista REAL y actual de roles directo de la API, en vez de
+    # confiar en la caché local del bot (que puede quedar desactualizada
+    # entre ejecuciones y causar que se creen roles de más).
+    try:
+        roles_actuales = await guild.fetch_roles()
+    except discord.HTTPException:
+        roles_actuales = guild.roles
+
+    mapa_nombre_a_roles = {}
+    for r in roles_actuales:
+        mapa_nombre_a_roles.setdefault(r.name, []).append(r)
+
+    # Avisamos si ya existen duplicados de ejecuciones anteriores (no los
+    # borramos solos, porque no está pedido eliminar roles sin instrucción
+    # explícita — solo lo reportamos para que se revise a mano).
+    for nombre, lista in mapa_nombre_a_roles.items():
+        if len(lista) > 1 and any(d["nombre"] == nombre for d in ROLES):
+            errores.append(
+                f"⚠️ Ya existían {len(lista)} roles llamados **{nombre}** antes de esta ejecución — "
+                f"revisalos a mano, el bot no borra roles duplicados solo"
+            )
+
     for datos in ROLES:
         nombre = datos["nombre"]
         color = discord.Colour(int(datos["color"].lstrip("#"), 16))
         permisos_kwargs = datos.get("permisos_guild", {})
         permisos = discord.Permissions(**permisos_kwargs) if permisos_kwargs else discord.Permissions.none()
 
-        rol_existente = discord.utils.get(guild.roles, name=nombre)
+        candidatos = mapa_nombre_a_roles.get(nombre, [])
+        rol_existente = candidatos[0] if candidatos else None
+
         if rol_existente:
             reutilizados += 1
             try:
@@ -133,6 +157,14 @@ async def _sincronizar_roles(guild):
                 nuevo = await guild.create_role(name=nombre, colour=color, permissions=permisos, mentionable=True)
                 creados += 1
                 roles_por_nombre[nombre] = nuevo
+                # Actualizamos el mapa local al toque para que el resto del
+                # mismo run (y cualquier nombre repetido en ROLES) lo vea.
+                mapa_nombre_a_roles[nombre] = [nuevo]
+                if nuevo.name != nombre:
+                    errores.append(
+                        f"⚠️ Discord guardó el rol como **{nuevo.name}** en vez de **{nombre}** "
+                        f"(puede pasar con ciertos emojis) — revisalo a mano"
+                    )
             except discord.Forbidden:
                 errores.append(f"No pude crear el rol **{nombre}** (permisos insuficientes)")
             except discord.HTTPException as e:
