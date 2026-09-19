@@ -12,6 +12,12 @@ from utils.embeds import embed_error
 
 LIMITE_CAMPO_EMBED = 1024
 
+# IDs de los canales que creó Discord al activar Comunidad en el servidor NUEVO.
+# Si por algún motivo no se encuentran por ID, se usan los canales que Discord
+# tiene registrados como "reglas" y "actualizaciones de la comunidad".
+REGLAS_ID_NUEVO = 1551000715273568378
+MODERADOR_ID_NUEVO = 1551000715273568381
+
 _CLASES_CANAL = {
     "texto": discord.TextChannel,
     "voz": discord.VoiceChannel,
@@ -35,6 +41,14 @@ def _nombre_normalizado(nombre, tipo):
     if tipo in ("texto", "foro"):
         return nombre.lower().replace(" ", "-")
     return nombre
+
+
+def _es_reglas(id_existente):
+    return id_existente is not None and id_existente in (CANAL_REGLAS_ID, REGLAS_ID_NUEVO)
+
+
+def _es_moderador(id_existente):
+    return id_existente is not None and id_existente in (CANAL_MODERADOR_ID, MODERADOR_ID_NUEVO)
 
 
 async def _progreso(mensaje, texto):
@@ -264,9 +278,9 @@ async def _obtener_o_crear_canal(guild, categoria, datos, overwrites, canal_regl
         # de otro servidor no sirven). Cualquier otro id_existente se busca
         # solo dentro de este servidor.
         if id_existente is not None:
-            if id_existente == CANAL_REGLAS_ID:
+            if _es_reglas(id_existente):
                 canal, es_de_community = canal_reglas, True
-            elif id_existente == CANAL_MODERADOR_ID:
+            elif _es_moderador(id_existente):
                 canal, es_de_community = canal_updates, True
             else:
                 canal = guild.get_channel(id_existente)
@@ -387,12 +401,19 @@ class SetupServidorCog(commands.Cog):
             ))
             return
 
-        canal_reglas = guild.rules_channel
-        canal_updates = guild.public_updates_channel
-        if "COMMUNITY" not in guild.features or canal_reglas is None or canal_updates is None:
+        if "COMMUNITY" not in guild.features:
             await ctx.send(embed=embed_error(
                 "Primero activá **Comunidad** en Configuración del servidor → Habilitar comunidad "
                 "(terminá el asistente de Discord) y después volvé a correr `!server`."
+            ))
+            return
+
+        canal_reglas = guild.get_channel(REGLAS_ID_NUEVO) or guild.rules_channel
+        canal_updates = guild.get_channel(MODERADOR_ID_NUEVO) or guild.public_updates_channel
+        if not isinstance(canal_reglas, discord.TextChannel) or not isinstance(canal_updates, discord.TextChannel):
+            await ctx.send(embed=embed_error(
+                f"No encontré los canales de reglas (`{REGLAS_ID_NUEVO}`) y moderación "
+                f"(`{MODERADOR_ID_NUEVO}`) en este servidor. ¿Estás corriendo `!server` en el servidor correcto?"
             ))
             return
 
@@ -456,9 +477,9 @@ class SetupServidorCog(commands.Cog):
                     ids_estructura.add(canal.id)
 
                     ide = datos_canal.get("id_existente")
-                    if ide is not None and ide == CANAL_REGLAS_ID:
+                    if _es_reglas(ide):
                         canal_reglas_obj = canal
-                    elif ide is not None and ide == CANAL_MODERADOR_ID:
+                    elif _es_moderador(ide):
                         canal_moderador_obj = canal
 
                     if datos_canal["tipo"] == "foro":
